@@ -1,0 +1,10 @@
+## Interface: 20400
+## Title: SpamBlock
+## Author: Pyralis
+## Version: 2.5
+## Notes: Allows duplicate message blocking, whitelist/blacklist filters for messages and names, and special filtering like blocking unknown languages in Shattrath.
+## SavedVariables: SpamBlockSave
+## DefaultState: Enabled
+## LoadOnDemand: 0
+
+SpamBlock.lua

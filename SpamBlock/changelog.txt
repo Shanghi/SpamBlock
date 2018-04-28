@@ -1,0 +1,44 @@
+2.5 (4/5/18):
+	* Changed the options window to be wider.
+	* Added statistics in the options window so there wouldn't be a huge empty space.
+
+2.4 (7/13/17):
+	* Added "All" category to the block/allow lists.
+	* Added "Special: Names" category to block/allow everything that a certain mob or player says.
+	* Added an option to continue blocking someone for a second after one of their messages matches something on a block list. This is for when someone sends multiple messages about the same thing at once (like a 3 message long guild ad probably with icons on the sides to look professional), causing only the first to be blocked while the others look innocent.
+	* Removed specific "world" channel things.
+
+2.3 (5/26/16):
+   * Fixed cases where adding a block line like "$" gets normalized to "" after punctuation is removed which causes it to match and block everything.
+   * Added an option to make Yell's block and allow lists use the ones from "Channels: General & World."
+   * Added an option for each chat type to normalize the messages there (remove spaces/punctuation/{icons}/drunk text) so that things like "hello" and "h-e-l-l-o! {skull}" count as the same. This was already done before by default, but can be disabled now.
+
+2.2 (5/19/16):
+   * Fixed drunk text to not be able to bypass blocks.
+   * Separated emote actions like /bow from the emote blacklist/whitelist, so you can do things like block all of them except ones with "you" in them.
+   * Changed test mode to just add a red [Spam] tag in front of the message.
+
+2.1 (4/8/16):
+   * Added an option to translate spell/craft links to the client's language.
+   * Added WorldDefense and combined it with LocalDefense settings.
+
+2.0 (10/7/15):
+   * Replaced the slash commands with an options window. "/spamblock" will open it. "/spamblock stats" still works.
+   * Changed message filters - now each chat type/channel has its own block/allow lists. AFK and Battleground special filtering was removed, but an AFK message block filter is created by default in the System chat type.
+   * Changed duplicate message blocking to have 2 groups - one for potentially spammy channels and one for everything else. This was to allow for a shorter timer (like 1 or 2 seconds) to block things like /spit spam or someone accidentally using a "DRUMMING NOW!!!" macro 10 times at once.
+   * Added an unknown Shattrath language filter to block messages using unknown game languages - only in Shattrath because it can be useful to hear if someone is nearby in PvP.
+   * Added an option to change CLINK links into proper links.
+   * Added an option to remove raid target icons from numbered channels like World and General (you can still see them everywhere else like raid/yell/party/etc)
+
+1.3 (1/21/14):
+   * Added a battleground filter.
+   * Added the text_emote channel type for things like /spit and /chicken.
+   * Rewrote filtering to be simpler and not need chat events.
+   * Changed some command line output things slightly: stat percentage shows 2 decimal places, channel list is in a specific order and tells what whisper_inform is.
+
+1.2 (11/30/13):
+   * Made all settings available with the /spamblock command.
+   * Added allow/block lists to either always allow or always block messages that contain certain text.
+
+1.1 (11/29/13):
+   * Fixed the case where a yell then custom channel containing the same message would show both instead of blocking the custom channel message.
