@@ -1,3 +1,6 @@
+2.6 (5/2/18):
+	* Added an option to block channel invites from people that aren't friends, guild members, or group members.
+
 2.5 (4/5/18):
 	* Changed the options window to be wider.
 	* Added statistics in the options window so there wouldn't be a huge empty space.

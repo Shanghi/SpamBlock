@@ -100,6 +100,38 @@ local function SetAllFilterLists()
 	end
 end
 
+--------------------------------------------------
+-- return true if a player is not a friend, guild member, or group member
+--------------------------------------------------
+local function IsStranger(name)
+	for i=1,GetNumFriends() do
+		if name == GetFriendInfo(i) then
+			return
+		end
+	end
+	if GetNumRaidMembers() > 0 then
+		for i=1,MAX_RAID_MEMBERS do
+			if name == (GetRaidRosterInfo(i)) then
+				return
+			end
+		end
+	elseif GetNumPartyMembers() > 0 then
+		for i=1,GetNumPartyMembers() do
+			if name == UnitName("party"..i) then
+				return
+			end
+		end
+	end
+	if IsInGuild() then
+		for i=1,GetNumGuildMembers() do
+			if name == GetGuildRosterInfo(i) then
+				return
+			end
+		end
+	end
+	return true
+end
+
 ----------------------------------------------------------------------------------------------------
 -- GUI
 ----------------------------------------------------------------------------------------------------
@@ -173,7 +205,7 @@ textureHeader:SetHeight(64)
 textureHeader:SetPoint("TOP", 0, 12)
 local textHeader = guiFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 textHeader:SetPoint("TOP", textureHeader, "TOP", 0, -14)
-textHeader:SetText("SpamBlock 2.5")
+textHeader:SetText("SpamBlock 2.6")
 
 --------------------------------------------------
 -- duplicate filter checkboxes - left
@@ -400,6 +432,12 @@ checkboxExtraSecond:SetScript("OnClick", function()
 	filterExtraSecond = this:GetChecked() or false
 	spamSettings.filterExtraSecond = filterExtraSecond
 end)
+
+-- Block channel invites
+local checkboxChannelInvites = CreateCheckbox("ChannelInvites", "|cffffffffBlock channel invites from strangers|r",
+	"This will block channel invitations from people that aren't friends, guild members, or in your group.")
+checkboxChannelInvites:SetPoint("TOPLEFT", checkboxExtraSecond, "BOTTOMLEFT", 0, 8)
+checkboxChannelInvites:SetScript("OnClick", function() spamSettings.filterChannelInvites = this:GetChecked() or false end)
 
 textFilterOptions:SetPoint("LEFT", checkboxNumbers, "LEFT",
 	((checkboxNumbers:GetWidth() + _G[checkboxNumbers:GetName().."Text"]:GetWidth())/2) - (textFilterOptions:GetWidth()/2) + 4, 0)
@@ -733,6 +771,7 @@ guiFrame:SetScript("OnShow", function()
 	checkboxRaidIcons:SetChecked(spamSettings.filterRaidIcons)
 	checkboxTranslateLinks:SetChecked(spamSettings.filterTranslateLinks)
 	checkboxExtraSecond:SetChecked(spamSettings.filterExtraSecond)
+	checkboxChannelInvites:SetChecked(spamSettings.filterChannelInvites)
 
 	UpdateEditBoxes()
 	UpdateGuiStatistics()
@@ -839,6 +878,16 @@ local function CheckMessage(channel)
 		return
 	end
 
+	-- check channel invitations
+	if channel == "CHAT_MSG_CHANNEL_NOTICE_USER" then
+		if spamSettings.filterChannelInvites and arg1 == "INVITE" and IsStranger(arg2) then
+			CountMessage(false)
+		else
+			CountMessage(true)
+		end
+		return
+	end
+
 	-- check language filtering
 	local arg3 = arg3
 	if filterShattrathLanguage and arg3 ~= "" and not languagesKnown[arg3] and (GetZonePVPInfo()) == "sanctuary" then
@@ -916,7 +965,8 @@ local function CheckMessage(channel)
 	end
 end
 
--- the chat filter - returns true if a message should be blocked
+-- chat filter - return true to block the message
+local lastChannelInviteId = nil -- used when show test messages for blocked channel invitations
 local function SpamBlockChatFilter(message)
 	-- if a message is new, it must be a channel message because all others are handled with events
 	if arg11 ~= onMessageId then
@@ -957,7 +1007,29 @@ local function SpamBlockChatFilter(message)
 			end)
 		end
 	elseif spamSettings.filterTestMode then
-		return false, "|cffff0000[Spam]|r "..message
+		if arg1 == "INVITE" then
+			-- a channel invitation - can't simply modify it like normal messages so go through each
+			-- chat tab and add it manually if needed
+			if arg11 == lastChannelInviteId then
+				return true -- already added
+			end
+			lastChannelInviteId = arg11
+			local info = ChatTypeInfo["CHANNEL"] or {} -- for the text color
+			local spam = "|cffff0000[Spam]|r " .. CHAT_INVITE_NOTICE:gsub("%%2$s", (arg2 or "Unknown")):gsub("%%1$s", (arg4 or "Unknown"))
+			for i=1,NUM_CHAT_WINDOWS do
+				if i ~= 2 then
+					for _,v in ipairs{GetChatWindowMessages(i)} do
+						if v == "CHANNEL" then
+							_G["ChatFrame"..i]:AddMessage(spam, info.r or 1, info.g or 1, info.b or 1, info.id)
+							break
+						end
+					end
+				end
+			end
+			return true
+		else
+			return false, "|cffff0000[Spam]|r "..message
+		end
 	end
 	return onMessageBlocked, message
 end
@@ -974,7 +1046,7 @@ local channelSubstituteSettings = {
 	["CHAT_MSG_MONSTER_YELL"]        = "CHAT_MSG_MONSTER_SAY",
 }
 
-local function SpamBlock_OnEvent(self, event, addon)
+local function SpamBlock_OnEvent(self, event, arg1, arg2)
 	--------------------------------------------------
 	-- Check new chat messages for spam
 	--------------------------------------------------
@@ -989,6 +1061,16 @@ local function SpamBlock_OnEvent(self, event, addon)
 	--------------------------------------------------
 	if event == "PLAYER_LEAVING_WORLD" then
 		extraSecondList = {}
+		return
+	end
+
+	--------------------------------------------------
+	-- channel invitation popup
+	--------------------------------------------------
+	if event == "CHANNEL_INVITE_REQUEST" then
+		if spamSettings.filterChannelInvites and IsStranger(arg2) then
+			StaticPopup_Hide("CHAT_CHANNEL_INVITE")
+		end
 		return
 	end
 
@@ -1008,7 +1090,7 @@ local function SpamBlock_OnEvent(self, event, addon)
 	--------------------------------------------------
 	-- loading settings and setting up filters/events
 	--------------------------------------------------
-	if event == "ADDON_LOADED" and addon == "SpamBlock" then
+	if event == "ADDON_LOADED" and arg1 == "SpamBlock" then
 		eventFrame:UnregisterEvent(event)
 
 		-- build any missing settings
@@ -1027,6 +1109,7 @@ local function SpamBlock_OnEvent(self, event, addon)
 		if spamSettings.filterRaidIcons         == nil then spamSettings.filterRaidIcons         = false  end -- if raid target icons are filtered from channels
 		if spamSettings.filterTranslateLinks    == nil then spamSettings.filterTranslateLinks    = false  end -- if spells/crafts are translated to the client's language
 		if spamSettings.filterExtraSecond       == nil then spamSettings.filterExtraSecond       = false  end -- if a player is blocked for an extra second after their message gets blocked
+		if spamSettings.filterChannelInvites    == nil then spamSettings.filterChannelInvites    = false  end -- if channel invites are blocked from non-guild/friend/group people
 		if spamSettings.channel                 == nil then spamSettings.channel                 = {}     end
 		--                                                                                                       format: {check duplicates, plain text allow, plain text block, formatted allow lines, formatted block lines, is normalized}
 		if spamSettings.channel["ALL"]                     == nil then spamSettings.channel["ALL"]                     = {false, "", "", {}, {}, true} end
@@ -1067,6 +1150,7 @@ local function SpamBlock_OnEvent(self, event, addon)
 			"CHAT_MSG_BATTLEGROUND",
 			"CHAT_MSG_BATTLEGROUND_LEADER",
 			"CHAT_MSG_CHANNEL",
+			"CHAT_MSG_CHANNEL_NOTICE_USER", -- for channel invitations
 			"CHAT_MSG_EMOTE",
 			"CHAT_MSG_GUILD",
 			"CHAT_MSG_MONSTER_EMOTE",
@@ -1082,7 +1166,7 @@ local function SpamBlock_OnEvent(self, event, addon)
 			"CHAT_MSG_TRADESKILLS",
 			"CHAT_MSG_WHISPER",
 			"CHAT_MSG_WHISPER_INFORM",
-			"CHAT_MSG_YELL",
+			"CHAT_MSG_YELL"
 		}
 		for i=1,#chat_channels do
 			-- CHANNEL event not used because it comes after the filtering function so would be useless
@@ -1097,9 +1181,10 @@ local function SpamBlock_OnEvent(self, event, addon)
 end
 
 eventFrame:SetScript("OnEvent", SpamBlock_OnEvent)
-eventFrame:RegisterEvent("ADDON_LOADED")         -- temporary - to load settings and initiate things
-eventFrame:RegisterEvent("QUEST_LOG_UPDATE")     -- temporary - to load languages
-eventFrame:RegisterEvent("PLAYER_LEAVING_WORLD") -- remove old data during loading screens
+eventFrame:RegisterEvent("ADDON_LOADED")           -- temporary - to load settings and initiate things
+eventFrame:RegisterEvent("QUEST_LOG_UPDATE")       -- temporary - to load languages
+eventFrame:RegisterEvent("PLAYER_LEAVING_WORLD")   -- remove old data during loading screens
+eventFrame:RegisterEvent("CHANNEL_INVITE_REQUEST") -- for hiding channel invitation popups
 
 ----------------------------------------------------------------------------------------------------
 -- slash command
