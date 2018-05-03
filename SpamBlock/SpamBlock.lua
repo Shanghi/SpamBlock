@@ -26,6 +26,7 @@ local recentMessages   = {}  -- table of recently seen messages: [message] = Get
 local extraSecondList  = {}  -- table for filterExtraSecond: {["name"] = {"channel", GetTime()}, ...}
 local onMessageId      = nil -- current message ID being processed
 local onMessageBlocked = nil -- if the current message has been blocked - true or false
+local onMessageChanged = nil -- the edited current message, so it doesn't have to keep modifying it
 
 -- table of known langauges for fast testing when using unknown Shattrath language filtering
 local knownLanguages = nil
@@ -190,20 +191,12 @@ local function CheckMessage(channel)
 		return
 	end
 
+	onMessageChanged = nil
+
 	-- allow your own messages
 	local arg2 = arg2
 	if arg2 == playerName and not spamSettings.filterSelf then
 		CountMessage(true)
-		return
-	end
-
-	-- check channel invitations
-	if channel == "CHAT_MSG_CHANNEL_NOTICE_USER" then
-		if spamSettings.filterChannelInvites and arg1 == "INVITE" and IsStranger(arg2) then
-			CountMessage(false)
-		else
-			CountMessage(true)
-		end
 		return
 	end
 
@@ -296,22 +289,66 @@ local function CheckMessage(channel)
 	end
 end
 
--- chat filter - return true to block the message
-local lastChannelInviteId = nil -- used when show test messages for blocked channel invitations
-local function SpamBlockChatFilter(message)
-	-- if a message is new, it must be a channel message because all others are handled with events
+--------------------------------------------------
+-- chat frame filter - for channel invitations
+-- block: return true / allow: return false, message
+--------------------------------------------------
+local function SpamBlockInviteFilter(message)
+	-- not an invitation so allow
+	if arg1 ~= "INVITE" then
+		CountMessage(true)
+		return false, message
+	end
+
+	-- if not already checked, count the message ar blocked or allowed
+	local arg11 = arg11
 	if arg11 ~= onMessageId then
-		CheckMessage("CHAT_MSG_CHANNEL")
-		-- remove raid icons from the channel message if wanted
-		if not onMessageBlocked and filterRaidIcons then
-			message = message:gsub("({.-})(%s?)", function(tag, space) return raidIconList[lower(tag)] and "" or tag..space end)
+		if spamSettings.filterChannelInvites and IsStranger(arg2) then
+			CountMessage(false)
+			-- can't just edit this message, so each tab chat will be checked to add it there if wanted
+			if spamSettings.filterTestMode then
+				local info = ChatTypeInfo["CHANNEL"] or {} -- for the text color
+				local spam = "|cffff0000[Spam]|r " .. CHAT_INVITE_NOTICE:gsub("%%2$s", (arg2 or "Unknown")):gsub("%%1$s", (arg4 or "Unknown"))
+				for i=1,NUM_CHAT_WINDOWS do
+					if i ~= 2 then
+						for _,v in ipairs{GetChatWindowMessages(i)} do
+							if v == "CHANNEL" then
+								_G["ChatFrame"..i]:AddMessage(spam, info.r or 1, info.g or 1, info.b or 1, info.id)
+								break
+							end
+						end
+					end
+				end
+			end
+			return true, message
+		else
+			CountMessage(true)
 		end
+	end
+	return onMessageBlocked, message
+end
+
+--------------------------------------------------
+-- chat frame filter - for normal messages
+-- block: return true / allow: return false, message
+--------------------------------------------------
+local function SpamBlockChatFilter(event, message)
+	CheckMessage(event)
+
+	-- the filter is called for each chat tab, so the results are saved to be used quickly here
+	if onMessageChanged then
+		return onMessageBlocked, onMessageChanged
 	end
 
 	if not onMessageBlocked then
+		-- remove raid icons from the channel message if wanted
+		if filterRaidIcons and event == "CHAT_MSG_CHANNEL" then
+			message = message:gsub("({.-})(%s?)", function(tag, space) return raidIconList[lower(tag)] and "" or tag..space end)
+		end
+
 		-- fix CLINK links if wanted
 		if filterClinkFix and message:find("{CLINK") then
-			-- from Chatter
+			-- copied from Chatter
 			message = message:gsub("{CLINK:item:(%x+):([%d-]-:[%d-]-:[%d-]-:[%d-]-:[%d-]-:[%d-]-:[%d-]-:[%d-]-):([^}]-)}", "|c%1|Hitem:%2|h[%3]|h|r")
 			message = message:gsub("{CLINK:enchant:(%x+):([%d-]-):([^}]-)}", "|c%1|Henchant:%2|h[%3]|h|r")
 			message = message:gsub("{CLINK:spell:(%x+):([%d-]-):([^}]-)}", "|c%1|Hspell:%2|h[%3]|h|r")
@@ -338,53 +375,17 @@ local function SpamBlockChatFilter(message)
 			end)
 		end
 	elseif spamSettings.filterTestMode then
-		if arg1 == "INVITE" then
-			-- a channel invitation - can't simply modify it like normal messages so go through each
-			-- chat tab and add it manually if needed
-			if arg11 == lastChannelInviteId then
-				return true -- already added
-			end
-			lastChannelInviteId = arg11
-			local info = ChatTypeInfo["CHANNEL"] or {} -- for the text color
-			local spam = "|cffff0000[Spam]|r " .. CHAT_INVITE_NOTICE:gsub("%%2$s", (arg2 or "Unknown")):gsub("%%1$s", (arg4 or "Unknown"))
-			for i=1,NUM_CHAT_WINDOWS do
-				if i ~= 2 then
-					for _,v in ipairs{GetChatWindowMessages(i)} do
-						if v == "CHANNEL" then
-							_G["ChatFrame"..i]:AddMessage(spam, info.r or 1, info.g or 1, info.b or 1, info.id)
-							break
-						end
-					end
-				end
-			end
-			return true
-		else
-			return false, "|cffff0000[Spam]|r " .. message
-		end
+		onMessageChanged = "|cffff0000[Spam]|r " .. message
+		return false, onMessageChanged
 	end
+	onMessageChanged = message
 	return onMessageBlocked, message
 end
 
 ----------------------------------------------------------------------------------------------------
 -- event handling
 ----------------------------------------------------------------------------------------------------
--- table to convert certain channels to use other channel settings
-local channelSubstituteSettings = {
-	["CHAT_MSG_BATTLEGROUND_LEADER"] = "CHAT_MSG_BATTLEGROUND",
-	["CHAT_MSG_RAID_LEADER"]         = "CHAT_MSG_RAID",
-	["CHAT_MSG_RAID_WARNING"]        = "CHAT_MSG_RAID",
-	["CHAT_MSG_MONSTER_EMOTE"]       = "CHAT_MSG_MONSTER_SAY",
-	["CHAT_MSG_MONSTER_YELL"]        = "CHAT_MSG_MONSTER_SAY",
-}
-
 local function SpamBlock_OnEvent(self, event, arg1, arg2)
-	-- Check new chat message for spam
-	if event:sub(1, 4) == "CHAT" then
-		event = channelSubstituteSettings[event] or event
-		CheckMessage(event)
-		return
-	end
-
 	-- remove old data during loading screen
 	if event == "PLAYER_LEAVING_WORLD" then
 		extraSecondList = {}
@@ -398,105 +399,98 @@ local function SpamBlock_OnEvent(self, event, arg1, arg2)
 		end
 		return
 	end
-end
 
---------------------------------------------------
--- loading settings and setting up filters/events
---------------------------------------------------
-local function SpamBlock_OnAddonLoadEvent(self, event, addon)
-	if addon ~= "SpamBlock" then
-		return
-	end
-	spamBlockFrame:UnregisterEvent(event)
+	-- loading settings and setting up filters/events
+	if event == "ADDON_LOADED" and arg1 == "SpamBlock" then
+		spamBlockFrame:UnregisterEvent(event)
 
-	-- build any missing settings
-	if SpamBlockSave == nil then
-		SpamBlockSave = {}
-	end
-	spamSettings = SpamBlockSave
-	if spamSettings.amountAllowed           == nil then spamSettings.amountAllowed           = 0      end -- total amount of allowed messages
-	if spamSettings.amountBlocked           == nil then spamSettings.amountBlocked           = 0      end -- total amount of blocked messages
-	if spamSettings.blockTime               == nil then spamSettings.blockTime               = {60,2} end -- how many seconds to block a message before allowing it again [1]=noisy channels, [2]=other channels
-	if spamSettings.filterTestMode          == nil then spamSettings.filterTestMode          = false  end -- if messages that are blocked should be shown
-	if spamSettings.filterSelf              == nil then spamSettings.filterSelf              = false  end -- if your own messages will be filtered
-	if spamSettings.filterNumbers           == nil then spamSettings.filterNumbers           = false  end -- ignore numbers, so "need 4 dps" and "need 2 dps" count as the same
-	if spamSettings.filterShattrathLanguage == nil then spamSettings.filterShattrathLanguage = false  end -- if unknown languages are blocked while in Shattrath
-	if spamSettings.filterClinkFix          == nil then spamSettings.filterClinkFix          = true   end -- if CLINK links should be changed into proper links
-	if spamSettings.filterRaidIcons         == nil then spamSettings.filterRaidIcons         = false  end -- if raid target icons are filtered from channels
-	if spamSettings.filterTranslateLinks    == nil then spamSettings.filterTranslateLinks    = false  end -- if spells/crafts are translated to the client's language
-	if spamSettings.filterExtraSecond       == nil then spamSettings.filterExtraSecond       = false  end -- if a player is blocked for an extra second after their message gets blocked
-	if spamSettings.filterChannelInvites    == nil then spamSettings.filterChannelInvites    = false  end -- if channel invites are blocked from non-guild/friend/group people
-	if spamSettings.channel                 == nil then spamSettings.channel                 = {}     end
-	spamSettings.sessionAllowed = 0
-	spamSettings.sessionBlocked = 0
-
-	-- channel format: {check duplicates, plain text allow, plain text block, formatted allow lines, formatted block lines, is normalized}
-	local channels = spamSettings.channel
-	if channels["ALL"]                     == nil then channels["ALL"]                     = {false, "", "", {}, {}, true} end
-	if channels["CHAT_MSG_CHANNEL"]        == nil then channels["CHAT_MSG_CHANNEL"]        = {false, "", "", {}, {}, true} end
-	if channels["CHAT_MSG_BATTLEGROUND"]   == nil then channels["CHAT_MSG_BATTLEGROUND"]   = {true,  "", "", {}, {}, true} end
-	if channels["CHAT_MSG_EMOTE"]          == nil then channels["CHAT_MSG_EMOTE"]          = {true,  "", "", {}, {}, true} end
-	if channels["CHAT_MSG_TEXT_EMOTE"]     == nil then channels["CHAT_MSG_TEXT_EMOTE"]     = {channels["CHAT_MSG_EMOTE"][1],  "", "", {}, {}, true} end
-	if channels["CHAT_MSG_GUILD"]          == nil then channels["CHAT_MSG_GUILD"]          = {false, "", "", {}, {}, true} end
-	if channels["CHAT_MSG_MONSTER_SAY"]    == nil then channels["CHAT_MSG_MONSTER_SAY"]    = {false, "", "", {}, {}, true} end
-	if channels["CHAT_MSG_PARTY"]          == nil then channels["CHAT_MSG_PARTY"]          = {true,  "", "", {}, {}, true} end
-	if channels["CHAT_MSG_RAID"]           == nil then channels["CHAT_MSG_RAID"]           = {true,  "", "", {}, {}, true} end
-	if channels["CHAT_MSG_SAY"]            == nil then channels["CHAT_MSG_SAY"]            = {true,  "", "", {}, {}, true} end
-	if channels["CHAT_MSG_SYSTEM"]         == nil then channels["CHAT_MSG_SYSTEM"]         = {false, "rolls", "", {"rolls"}, {}, true} end
-	if channels["CHAT_MSG_TRADESKILLS"]    == nil then channels["CHAT_MSG_TRADESKILLS"]    = {false, "", "", {}, {}, true} end
-	if channels["CHAT_MSG_WHISPER"]        == nil then channels["CHAT_MSG_WHISPER"]        = {true,  "", "", {}, {}, true} end
-	if channels["CHAT_MSG_WHISPER_INFORM"] == nil then channels["CHAT_MSG_WHISPER_INFORM"] = {false, "", "", {}, {}, true} end
-	if channels["CHAT_MSG_YELL"]           == nil then channels["CHAT_MSG_YELL"]           = {true,  "", "", {}, {}, true} end
-	if channels["CUSTOM"]                  == nil then channels["CUSTOM"]                  = {false, "", "", {}, {}, true} end
-	if channels["GENERAL"]                 == nil then channels["GENERAL"]                 = {true,  "", "", {}, {}, true} end
-	if channels["GUILDRECRUITMENT"]        == nil then channels["GUILDRECRUITMENT"]        = {true,  "", "", {}, {}, true} end
-	if channels["DEFENSE"]                 == nil then channels["DEFENSE"]                 = {true,  "", "", {}, {}, true} end
-	if channels["LOOKINGFORGROUP"]         == nil then channels["LOOKINGFORGROUP"]         = {true,  "", "", {}, {}, true} end
-	if channels["TRADE"]                   == nil then channels["TRADE"]                   = {true,  "", "", {}, {}, true} end
-	if channels["NAMES"]                   == nil then channels["NAMES"]                   = {false, "", "", {}, {}, false} end
-
-	-- set copies for settings that are used a lot
-	SpamBlockFrame.UpdateLocalCopies()
-	allChatInfo = channels["ALL"]
-	nameInfo    = channels["NAMES"]
-
-	-- set up events and filters
-	local chat_channels = {
-		"CHAT_MSG_BATTLEGROUND",
-		"CHAT_MSG_BATTLEGROUND_LEADER",
-		"CHAT_MSG_CHANNEL",
-		"CHAT_MSG_CHANNEL_NOTICE_USER", -- for channel invitations
-		"CHAT_MSG_EMOTE",
-		"CHAT_MSG_GUILD",
-		"CHAT_MSG_MONSTER_EMOTE",
-		"CHAT_MSG_MONSTER_SAY",
-		"CHAT_MSG_MONSTER_YELL",
-		"CHAT_MSG_PARTY",
-		"CHAT_MSG_RAID",
-		"CHAT_MSG_RAID_LEADER",
-		"CHAT_MSG_RAID_WARNING",
-		"CHAT_MSG_SAY",
-		"CHAT_MSG_SYSTEM",
-		"CHAT_MSG_TEXT_EMOTE",
-		"CHAT_MSG_TRADESKILLS",
-		"CHAT_MSG_WHISPER",
-		"CHAT_MSG_WHISPER_INFORM",
-		"CHAT_MSG_YELL"
-	}
-	for i=1,#chat_channels do
-		-- CHANNEL event not used because it comes after the filtering function so would be useless
-		if chat_channels[i] ~= "CHAT_MSG_CHANNEL" then
-			spamBlockFrame:RegisterEvent(chat_channels[i])
+		-- build any missing settings
+		if SpamBlockSave == nil then
+			SpamBlockSave = {}
 		end
-		ChatFrame_AddMessageEventFilter(chat_channels[i], SpamBlockChatFilter)
+		spamSettings = SpamBlockSave
+		if spamSettings.amountAllowed           == nil then spamSettings.amountAllowed           = 0      end -- total amount of allowed messages
+		if spamSettings.amountBlocked           == nil then spamSettings.amountBlocked           = 0      end -- total amount of blocked messages
+		if spamSettings.blockTime               == nil then spamSettings.blockTime               = {60,2} end -- how many seconds to block a message before allowing it again [1]=noisy channels, [2]=other channels
+		if spamSettings.filterTestMode          == nil then spamSettings.filterTestMode          = false  end -- if messages that are blocked should be shown
+		if spamSettings.filterSelf              == nil then spamSettings.filterSelf              = false  end -- if your own messages will be filtered
+		if spamSettings.filterNumbers           == nil then spamSettings.filterNumbers           = false  end -- ignore numbers, so "need 4 dps" and "need 2 dps" count as the same
+		if spamSettings.filterShattrathLanguage == nil then spamSettings.filterShattrathLanguage = false  end -- if unknown languages are blocked while in Shattrath
+		if spamSettings.filterClinkFix          == nil then spamSettings.filterClinkFix          = true   end -- if CLINK links should be changed into proper links
+		if spamSettings.filterRaidIcons         == nil then spamSettings.filterRaidIcons         = false  end -- if raid target icons are filtered from channels
+		if spamSettings.filterTranslateLinks    == nil then spamSettings.filterTranslateLinks    = false  end -- if spells/crafts are translated to the client's language
+		if spamSettings.filterExtraSecond       == nil then spamSettings.filterExtraSecond       = false  end -- if a player is blocked for an extra second after their message gets blocked
+		if spamSettings.filterChannelInvites    == nil then spamSettings.filterChannelInvites    = false  end -- if channel invites are blocked from non-guild/friend/group people
+		if spamSettings.channel                 == nil then spamSettings.channel                 = {}     end
+		spamSettings.sessionAllowed = 0
+		spamSettings.sessionBlocked = 0
+
+		-- channel format: {check duplicates, plain text allow, plain text block, formatted allow lines, formatted block lines, is normalized}
+		local channels = spamSettings.channel
+		if channels["ALL"]                     == nil then channels["ALL"]                     = {false, "", "", {}, {}, true} end
+		if channels["CHAT_MSG_CHANNEL"]        == nil then channels["CHAT_MSG_CHANNEL"]        = {false, "", "", {}, {}, true} end
+		if channels["CHAT_MSG_BATTLEGROUND"]   == nil then channels["CHAT_MSG_BATTLEGROUND"]   = {true,  "", "", {}, {}, true} end
+		if channels["CHAT_MSG_EMOTE"]          == nil then channels["CHAT_MSG_EMOTE"]          = {true,  "", "", {}, {}, true} end
+		if channels["CHAT_MSG_TEXT_EMOTE"]     == nil then channels["CHAT_MSG_TEXT_EMOTE"]     = {channels["CHAT_MSG_EMOTE"][1],  "", "", {}, {}, true} end
+		if channels["CHAT_MSG_GUILD"]          == nil then channels["CHAT_MSG_GUILD"]          = {false, "", "", {}, {}, true} end
+		if channels["CHAT_MSG_MONSTER_SAY"]    == nil then channels["CHAT_MSG_MONSTER_SAY"]    = {false, "", "", {}, {}, true} end
+		if channels["CHAT_MSG_PARTY"]          == nil then channels["CHAT_MSG_PARTY"]          = {true,  "", "", {}, {}, true} end
+		if channels["CHAT_MSG_RAID"]           == nil then channels["CHAT_MSG_RAID"]           = {true,  "", "", {}, {}, true} end
+		if channels["CHAT_MSG_SAY"]            == nil then channels["CHAT_MSG_SAY"]            = {true,  "", "", {}, {}, true} end
+		if channels["CHAT_MSG_SYSTEM"]         == nil then channels["CHAT_MSG_SYSTEM"]         = {false, "rolls", "", {"rolls"}, {}, true} end
+		if channels["CHAT_MSG_TRADESKILLS"]    == nil then channels["CHAT_MSG_TRADESKILLS"]    = {false, "", "", {}, {}, true} end
+		if channels["CHAT_MSG_WHISPER"]        == nil then channels["CHAT_MSG_WHISPER"]        = {true,  "", "", {}, {}, true} end
+		if channels["CHAT_MSG_WHISPER_INFORM"] == nil then channels["CHAT_MSG_WHISPER_INFORM"] = {false, "", "", {}, {}, true} end
+		if channels["CHAT_MSG_YELL"]           == nil then channels["CHAT_MSG_YELL"]           = {true,  "", "", {}, {}, true} end
+		if channels["CUSTOM"]                  == nil then channels["CUSTOM"]                  = {false, "", "", {}, {}, true} end
+		if channels["GENERAL"]                 == nil then channels["GENERAL"]                 = {true,  "", "", {}, {}, true} end
+		if channels["GUILDRECRUITMENT"]        == nil then channels["GUILDRECRUITMENT"]        = {true,  "", "", {}, {}, true} end
+		if channels["DEFENSE"]                 == nil then channels["DEFENSE"]                 = {true,  "", "", {}, {}, true} end
+		if channels["LOOKINGFORGROUP"]         == nil then channels["LOOKINGFORGROUP"]         = {true,  "", "", {}, {}, true} end
+		if channels["TRADE"]                   == nil then channels["TRADE"]                   = {true,  "", "", {}, {}, true} end
+		if channels["NAMES"]                   == nil then channels["NAMES"]                   = {false, "", "", {}, {}, false} end
+
+		-- set copies for settings that are used a lot
+		SpamBlockFrame.UpdateLocalCopies()
+		allChatInfo = channels["ALL"]
+		nameInfo = channels["NAMES"]
+
+		-- set up filters
+		local chat_events = {
+			["CHAT_MSG_BATTLEGROUND"] = "CHAT_MSG_BATTLEGROUND",
+			["CHAT_MSG_BATTLEGROUND_LEADER"] = "CHAT_MSG_BATTLEGROUND",
+			["CHAT_MSG_CHANNEL"] = "CHAT_MSG_CHANNEL",
+			["CHAT_MSG_EMOTE"] = "CHAT_MSG_EMOTE",
+			["CHAT_MSG_GUILD"] = "CHAT_MSG_GUILD",
+			["CHAT_MSG_MONSTER_EMOTE"] = "CHAT_MSG_MONSTER_SAY",
+			["CHAT_MSG_MONSTER_SAY"] = "CHAT_MSG_MONSTER_SAY",
+			["CHAT_MSG_MONSTER_YELL"] = "CHAT_MSG_MONSTER_SAY",
+			["CHAT_MSG_PARTY"] = "CHAT_MSG_PARTY",
+			["CHAT_MSG_RAID"] = "CHAT_MSG_RAID",
+			["CHAT_MSG_RAID_LEADER"] = "CHAT_MSG_RAID",
+			["CHAT_MSG_RAID_WARNING"] = "CHAT_MSG_RAID",
+			["CHAT_MSG_SAY"] = "CHAT_MSG_SAY",
+			["CHAT_MSG_SYSTEM"] = "CHAT_MSG_SYSTEM",
+			["CHAT_MSG_TEXT_EMOTE"] = "CHAT_MSG_TEXT_EMOTE",
+			["CHAT_MSG_TRADESKILLS"] = "CHAT_MSG_TRADESKILLS",
+			["CHAT_MSG_WHISPER"] = "CHAT_MSG_WHISPER",
+			["CHAT_MSG_WHISPER_INFORM"] = "CHAT_MSG_WHISPER_INFORM",
+			["CHAT_MSG_YELL"] = "CHAT_MSG_YELL",
+		}
+		for event,substitute in pairs(chat_events) do
+			ChatFrame_AddMessageEventFilter(event, function(message)
+				return SpamBlockChatFilter(substitute, message)
+			end)
+		end
+		ChatFrame_AddMessageEventFilter("CHAT_MSG_CHANNEL_NOTICE_USER", SpamBlockInviteFilter)
+
+		spamBlockFrame:RegisterEvent("PLAYER_LEAVING_WORLD")   -- remove old data during loading screens
+		spamBlockFrame:RegisterEvent("CHANNEL_INVITE_REQUEST") -- for hiding channel invitation popups
+		spamBlockFrame:SetScript("OnUpdate", SpamBlock_OnUpdate)
 	end
-	spamBlockFrame:RegisterEvent("PLAYER_LEAVING_WORLD")   -- remove old data during loading screens
-	spamBlockFrame:RegisterEvent("CHANNEL_INVITE_REQUEST") -- for hiding channel invitation popups
-	spamBlockFrame:SetScript("OnUpdate", SpamBlock_OnUpdate)
-	spamBlockFrame:SetScript("OnEvent", SpamBlock_OnEvent)
 end
 
-spamBlockFrame:SetScript("OnEvent", SpamBlock_OnAddonLoadEvent)
+spamBlockFrame:SetScript("OnEvent", SpamBlock_OnEvent)
 spamBlockFrame:RegisterEvent("ADDON_LOADED") -- temporary - to load settings and initiate things
 
 ----------------------------------------------------------------------------------------------------

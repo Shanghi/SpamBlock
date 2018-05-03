@@ -1,7 +1,7 @@
 ## Interface: 20400
 ## Title: SpamBlock
 ## Author: Pyralis
-## Version: 2.6
+## Version: 2.6.1
 ## Notes: Allows duplicate message blocking, whitelist/blacklist filters, and more to reduce spam.
 ## SavedVariables: SpamBlockSave
 ## DefaultState: Enabled

@@ -124,7 +124,7 @@ textureHeader:SetHeight(64)
 textureHeader:SetPoint("TOP", 0, 12)
 local textHeader = guiFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 textHeader:SetPoint("TOP", textureHeader, "TOP", 0, -14)
-textHeader:SetText("SpamBlock 2.6")
+textHeader:SetText("SpamBlock 2.6.1")
 
 --------------------------------------------------
 -- duplicate filter checkboxes - left
