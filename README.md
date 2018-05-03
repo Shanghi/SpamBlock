@@ -13,13 +13,16 @@
 * Can change CLINK links into proper links.
 * Can remove raid target icons from numbered channels (while keeping them in raid/yell/etc).
 * Can translate spell and recipe links (just the name, not the prefix like "Alchemy: ").
-* Can block or allow all messages from specific players or NPC.
+* Can block or allow all messages from specific players or NPCs.
+* Can block channel invitations from people that aren't friends, guild members, or group members.
 
 To open the settings, use: **`/spamblock`**<br/>
 To reset statistics, use: **`/spamblock stats reset`**
 
-## Screenshot:
-![!](https://i.imgur.com/ljCV4xT.png)
+## Screenshots:
+![!](https://i.imgur.com/PChqK3A.png)
+
+![!](https://i.imgur.com/HUe79Pm.png)
 
 ## Duplicate Message Blocking:
 Duplicate message blocking is split up into two groups of chat message types. The first, which have red names in the options, are more "spammy" and a longer timer to block each duplicate message may be suitable. The second group is for chat message types you might not want to block very long, but a 1 or 2 second duplicate block can still stop things like /spit spam or someone accidentally pressing a "USING DRUMS NOW!!!" macro 9999 times at once.
@@ -48,4 +51,4 @@ To block messages using some characters not normally used in English, you can us
 
 To block most (maybe all) emote actions like /bow that don't specifically target you, open the Emote Action lists, uncheck normalization, and add these:<br/>
 Block list: **`:.`**<br/>
-Allow list (the space after : is important): **`: you[ %.r]`**
+Allow list: **`: you[ %.r]`**
