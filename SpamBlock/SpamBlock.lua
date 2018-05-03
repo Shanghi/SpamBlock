@@ -400,6 +400,14 @@ local function SpamBlock_OnEvent(self, event, arg1, arg2)
 		return
 	end
 
+	-- able to update the guild and friend lists - it won't work if you try too soon
+	if event == "UPDATE_PENDING_MAIL" then
+		spamBlockFrame:UnregisterEvent(event)
+		GuildRoster() -- update the guild member list to know who's a member
+		ShowFriends() -- update the friend list to know who's on it
+		return
+	end
+
 	-- loading settings and setting up filters/events
 	if event == "ADDON_LOADED" and arg1 == "SpamBlock" then
 		spamBlockFrame:UnregisterEvent(event)
@@ -492,6 +500,7 @@ end
 
 spamBlockFrame:SetScript("OnEvent", SpamBlock_OnEvent)
 spamBlockFrame:RegisterEvent("ADDON_LOADED") -- temporary - to load settings and initiate things
+spamBlockFrame:RegisterEvent("UPDATE_PENDING_MAIL") -- temporarily - to update friends/guild lists
 
 ----------------------------------------------------------------------------------------------------
 -- slash command
