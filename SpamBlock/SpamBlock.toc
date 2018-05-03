@@ -8,3 +8,4 @@
 ## LoadOnDemand: 0
 
 SpamBlock.lua
+GUI.lua
